@@ -1,0 +1,107 @@
+#!/bin/bash
+
+# Comprobar que se ejecuta con sudo
+if [ "$EUID" -ne 0 ]; then
+  echo "Error: Por favor, ejecuta este comando usando sudo."
+  exit
+fi
+
+# Tu dominio DuckDNS fijo
+SERVER_ENDPOINT="gestoria-asir.duckdns.org"
+
+# Mostrar Menu
+echo "========================================="
+echo "      Gestor de Clientes WireGuard"
+echo "========================================="
+echo "1. Anadir un nuevo cliente"
+echo "2. Eliminar un cliente existente"
+echo "3. Salir"
+echo "========================================="
+read -p "Elige una opcion (1-3): " OPCION
+
+case $OPCION in
+  1)
+    echo ""
+    echo "--- ANADIR CLIENTE ---"
+    read -p "Nombre del nuevo cliente (sin espacios, ej. portatil_jefe): " CLIENT_NAME
+    read -p "IP interna para el cliente (ej. 10.8.0.3): " CLIENT_IP
+
+    CLIENT_PRIV=$(wg genkey)
+    CLIENT_PUB=$(echo "$CLIENT_PRIV" | wg pubkey)
+    SERVER_PUB=$(cat /etc/wireguard/publickey)
+    CONFIG_PATH="/etc/wireguard/${CLIENT_NAME}.conf"
+
+    # Crear el archivo del cliente
+    echo "[Interface]" > "$CONFIG_PATH"
+    echo "Address = ${CLIENT_IP}/32" >> "$CONFIG_PATH"
+    echo "PrivateKey = ${CLIENT_PRIV}" >> "$CONFIG_PATH"
+    echo "DNS = 1.1.1.1, 8.8.8.8" >> "$CONFIG_PATH"
+    echo "" >> "$CONFIG_PATH"
+    echo "[Peer]" >> "$CONFIG_PATH"
+    echo "PublicKey = ${SERVER_PUB}" >> "$CONFIG_PATH"
+    echo "Endpoint = ${SERVER_ENDPOINT}:51820" >> "$CONFIG_PATH"
+    echo "AllowedIPs = 0.0.0.0/0, ::/0" >> "$CONFIG_PATH"
+    echo "PersistentKeepalive = 25" >> "$CONFIG_PATH"
+
+    # Anadir al servidor
+    echo "" >> /etc/wireguard/wg0.conf
+    echo "# Cliente: ${CLIENT_NAME}" >> /etc/wireguard/wg0.conf
+    echo "[Peer]" >> /etc/wireguard/wg0.conf
+    echo "PublicKey = ${CLIENT_PUB}" >> /etc/wireguard/wg0.conf
+    echo "AllowedIPs = ${CLIENT_IP}/32" >> /etc/wireguard/wg0.conf
+
+    # Reiniciar WireGuard
+    systemctl restart wg-quick@wg0
+
+    echo ""
+    echo "Configuracion creada con exito en: $CONFIG_PATH"
+    echo "Cliente anadido al servidor y VPN reiniciada."
+    echo ""
+    echo "Escanea este codigo QR con la app de WireGuard:"
+    echo "------------------------------------------------------------"
+    qrencode -t ansiutf8 < "$CONFIG_PATH"
+    echo "------------------------------------------------------------"
+    echo "Si es para PC, copia el archivo $CONFIG_PATH a tu equipo."
+    ;;
+
+  2)
+    echo ""
+    echo "--- ELIMINAR CLIENTE ---"
+    # Listar clientes actuales basandonos en los archivos .conf existentes (excluyendo wg0.conf)
+    echo "Clientes actuales:"
+    ls /etc/wireguard/*.conf | grep -v 'wg0.conf' | xargs -n 1 basename | sed 's/.conf//g'
+    echo "------------------------"
+    
+    read -p "Escribe el nombre exacto del cliente a eliminar: " CLIENT_NAME
+    CONFIG_PATH="/etc/wireguard/${CLIENT_NAME}.conf"
+
+    if [ -f "$CONFIG_PATH" ]; then
+      # Eliminar el bloque exacto del cliente en wg0.conf
+      # Busca la linea del comentario y borra esa linea y las 3 siguientes
+      sed -i "/# Cliente: ${CLIENT_NAME}/,+3d" /etc/wireguard/wg0.conf
+      
+      # Eliminar el archivo del cliente
+      rm "$CONFIG_PATH"
+      
+      # Reiniciar WireGuard
+      systemctl restart wg-quick@wg0
+      
+      echo ""
+      echo "El cliente '${CLIENT_NAME}' ha sido eliminado correctamente del servidor."
+      echo "Se ha revocado su acceso y la VPN se ha reiniciado."
+    else
+      echo ""
+      echo "Error: No se ha encontrado el cliente '${CLIENT_NAME}'."
+    fi
+    ;;
+
+  3)
+    echo "Saliendo del gestor..."
+    exit 0
+    ;;
+
+  *)
+    echo "Opcion no valida. Saliendo..."
+    exit 1
+    ;;
+esac

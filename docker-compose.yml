@@ -1,0 +1,68 @@
+services:
+  # --- GESTOR DE PROXY (Nginx Proxy Manager) ---
+  npm:
+    image: 'jc21/nginx-proxy-manager:latest'
+    container_name: proxy_manager
+    restart: always
+    ports:
+      - '80:80'
+      - '81:81'
+      - '443:443'
+    volumes:
+      - ./npm_data:/data
+      - ./npm_letsencrypt:/etc/letsencrypt
+
+  # --- BASE DE DATOS UNIFICADA (MariaDB) ---
+  db:
+    image: mariadb:10.11
+    container_name: maria_db
+    init: true
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: password_maestra
+      MYSQL_USER: usuario_general
+      MYSQL_PASSWORD: Password_Seguro_123
+    volumes:
+      - ./db_data:/var/lib/mysql
+
+  # --- WEB ESTÁTICA (Nginx) ---
+  web_estatica:
+    image: nginx:latest
+    container_name: web_servidor
+    restart: always
+    volumes:
+      - ./sitio_web:/usr/share/nginx/html
+    networks:
+      - default
+
+  # --- NEXTCLOUD ---
+  nextcloud:
+    image: nextcloud:latest
+    container_name: nextcloud_app
+    restart: always
+    depends_on:
+      - db
+    environment:
+      - MYSQL_PASSWORD=Password_Seguro_123
+      - MYSQL_DATABASE=nextcloud_db
+      - MYSQL_USER=usuario_general
+      - MYSQL_HOST=db
+    volumes:
+      - ./nextcloud_data:/var/www/html
+
+  # --- SERVICIO MOODLE PERSONALIZADO ---
+  moodle_ubuntu:
+    build: .
+    container_name: moodle_server
+    restart: always
+    depends_on:
+      - db
+    volumes:
+      - ./moodle_data:/var/www/html
+      - ./moodle_files:/var/www/moodledata
+    networks:
+      - default
+
+networks:
+  default:
+    name: docker_default
